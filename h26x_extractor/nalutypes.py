@@ -23,6 +23,8 @@
 # TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.>
 
+import sys
+import bitstring
 from tabulate import tabulate
 
 # NAL REF IDC codes
@@ -200,6 +202,47 @@ class CodedSliceNonIDR(NALU):
 
         self.print_verbose()
 
+class SEI(NALU):
+    """
+    SEI class
+    """
+
+    def __init__(self, rbsp_bytes, verbose):
+        super(SEI, self).__init__(rbsp_bytes, True)
+        bs :bitstring.Bitstream = self.s
+    
+        payloadType = 0
+        while bs.peek('uint:8') == 0xff:
+            bs.read('uint:8')
+            payloadType += 255
+        payloadType += bs.read('uint:8')
+
+        payloadSize = 0
+        while bs.peek('uint:8') == 0xff:
+            bs.read('uint:8')
+            payloadSize += 255
+        payloadSize += bs.read('uint:8')
+
+
+        print("SEI payloadType: ", payloadType)
+        print("SEI payloadSize: ", payloadSize)
+
+
+        self.order = [
+            'uuid_iso_iec_11578'
+            ]
+        self.payloadType = payloadType
+        self.payloadSize = payloadSize
+        if payloadType == 5:
+            # user_data_unregistered SEI
+            self.uuid_iso_iec_11578 = bs.read('uint:128')
+            ba = bytearray(payloadSize-16)
+            for i in range(0, payloadSize-16):
+                ba[i] = bs.read('uint:8')
+
+            self.user_data_payload = str(ba)
+
+        self.print_verbose()
 
 class SPS(NALU):
     """

@@ -14,6 +14,7 @@ import time
 from docopt import docopt
 from . import __version__
 from . import h26x_parser
+from . import h26x_parser_ex
 
 args = docopt(__doc__, version=str(__version__), options_first=False)
 
@@ -25,8 +26,4 @@ def main():
 
 
 if __name__ == "__main__":
-    start = time.time()
-    main()
-    stop = time.time()
-    if args["--verbose"]:
-        print(main.__name__ + " took " + str(stop - start) + " seconds")
+    h26x_parser_ex.main()

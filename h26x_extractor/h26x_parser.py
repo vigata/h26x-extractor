@@ -38,7 +38,7 @@ class H26xParser:
     VALID_CALLBACKS = ["sps", "pps", "slice", "aud", "nalu"]
     startCodePrefixShort = b"\x00\x00\x01"
 
-    def __init__(self, f, verbose=False, use_bitstream=None):
+    def __init__(self, f, verbose=False, use_bitstream=None, byte_stream=None):
         """
         Create a new extractor for a .264/h264 file in Annex B format.
 
@@ -46,7 +46,9 @@ class H26xParser:
         use_bitstream: blob to use as bitstream (for testing)
         verbose: whether to print out NAL structure and fields
         """
-        if use_bitstream:
+        if byte_stream:
+            self.byte_stream = byte_stream
+        elif use_bitstream:
             self.byte_stream = bytearray.fromhex(use_bitstream)
         else:
             fn, ext = os.path.splitext(os.path.basename(f))
@@ -132,6 +134,7 @@ class H26xParser:
         nals = []
         retnals = []
 
+        print("size: ", size)
         pos = 0
         while pos < size:
             is4bytes = False
@@ -235,3 +238,6 @@ class H26xParser:
                     rbsp_payload_bs, nalu_sps, nalu_pps, self.verbose
                 )
                 self.__call("slice", rbsp_payload_bs)
+            elif type == nalutypes.NAL_UNIT_TYPE_SEI:
+                nalu_sei = nalutypes.SEI(rbsp_payload_bs, self.verbose)
+                self.__call("sei", rbsp_payload_bs)
