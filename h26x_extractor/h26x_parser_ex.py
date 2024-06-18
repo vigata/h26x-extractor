@@ -28,6 +28,7 @@ def main():
         sys.exit(1)
 
     def find_start_codes(data):
+        start_positions = []
         """
         Generator to find start codes and yield their positions in the data.
         Start codes are either 0x000001 or 0x00000001.
@@ -36,15 +37,16 @@ def main():
         while i < len(data) - 3:
             if data[i] == 0x00 and data[i + 1] == 0x00:
                 if data[i + 2] == 0x01:
-                    yield i 
+                    start_positions.append(i)
                     i += 3
                 elif i < len(data) - 4 and data[i + 2] == 0x00 and data[i + 3] == 0x01:
-                    yield i 
+                    start_positions.append(i) 
                     i += 4
                 else:
                     i += 2
             else:
                 i += 1
+        return start_positions
 
     def extract_nal_units_from_file(file_path):
         """
@@ -54,6 +56,7 @@ def main():
         nal_units = []
         pending_data = b''
 
+        parser = H26xParser(None, True, byte_stream=None)
         with open(file_path, 'rb') as file:
             while True:
                 data = file.read(buffer_size)
@@ -63,8 +66,7 @@ def main():
                 data = pending_data + data
 
                 # Find start codes in the current buffer
-                start_positions = list(find_start_codes(data))
-                print(start_positions)
+                start_positions = find_start_codes(data)
 
                 # Check if we should preserve some data for the next buffer
                 if start_positions:
@@ -80,11 +82,11 @@ def main():
                     start = start_positions[i]
                     end = start_positions[i + 1]
                     nal_units.append(data[start:end])
-                    # H26xParser(None, True, byte_stream=data[start:end]).parse()
+                    parser.parse(byte_stream=data[start:end])
 
             # Handle the last NAL unit
             if pending_data:
-                last_positions = list(find_start_codes(pending_data))
+                last_positions = find_start_codes(pending_data)
                 if last_positions:
                     for i in range(len(last_positions) - 1):
                         start = last_positions[i]
@@ -98,8 +100,8 @@ def main():
     # Example usage
     nal_units = extract_nal_units_from_file(args.input_file)
 
-    for idx, nal in enumerate(nal_units):
-        print(f"NAL Unit {idx + 1}: {nal.hex()}")
+    # for idx, nal in enumerate(nal_units):
+    #     print(f"NAL Unit {idx + 1}: {nal.hex()}")
 
 
 
