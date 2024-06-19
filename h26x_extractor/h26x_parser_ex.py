@@ -20,6 +20,79 @@ def parse_args():
     parser.add_argument("input_file",  help="Input file(s)")
     return parser.parse_args(), parser
 
+def find_start_codes(data):
+    start_positions = []
+    """
+    Generator to find start codes and yield their positions in the data.
+    Start codes are either 0x000001 or 0x00000001.
+    """
+    i = 0
+    while i < len(data) - 3:
+        if data[i] == 0x00 and data[i + 1] == 0x00:
+            if data[i + 2] == 0x01:
+                start_positions.append(i)
+                i += 3
+            elif i < len(data) - 4 and data[i + 2] == 0x00 and data[i + 3] == 0x01:
+                start_positions.append(i) 
+                i += 4
+            else:
+                i += 2
+        else:
+            i += 1
+    return start_positions
+
+def extract_nal_units_from_file(file_path):
+    """
+    Extract NAL units from a file containing RBSP data and handle data across buffer boundaries.
+    """
+    buffer_size = 4096
+    nal_units = []
+    pending_data = b''
+
+    def on_nalu(nalu_obj):
+        print(f"NALU: {nalu_obj}")
+              
+    parser = H26xParser(None, True, byte_stream=None)
+    parser.set_callback("nalu", on_nalu)
+    with open(file_path, 'rb') as file:
+        while True:
+            data = file.read(buffer_size)
+            if not data:
+                break
+            # Prepend pending data from previous buffer read
+            data = pending_data + data
+
+            # Find start codes in the current buffer
+            start_positions = find_start_codes(data)
+
+            # Check if we should preserve some data for the next buffer
+            if start_positions:
+                last_start = start_positions[-1]
+                pending_data = data[last_start:]
+                data = data[:last_start]
+            else:
+                pending_data = data
+                continue
+
+            # Extract NAL units from this buffer slice
+            for i in range(len(start_positions) - 1):
+                start = start_positions[i]
+                end = start_positions[i + 1]
+                nal_units.append(data[start:end])
+                parser.parse(byte_stream=data[start:end])
+
+        # Handle the last NAL unit
+        if pending_data:
+            last_positions = find_start_codes(pending_data)
+            if last_positions:
+                for i in range(len(last_positions) - 1):
+                    start = last_positions[i]
+                    end = last_positions[i + 1]
+                    nal_units.append(pending_data[start:end])
+                # Append the last fragment
+                nal_units.append(pending_data[last_positions[-1]:])
+
+    return nal_units
 
 def main():
     args, parser = parse_args()
@@ -27,75 +100,6 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    def find_start_codes(data):
-        start_positions = []
-        """
-        Generator to find start codes and yield their positions in the data.
-        Start codes are either 0x000001 or 0x00000001.
-        """
-        i = 0
-        while i < len(data) - 3:
-            if data[i] == 0x00 and data[i + 1] == 0x00:
-                if data[i + 2] == 0x01:
-                    start_positions.append(i)
-                    i += 3
-                elif i < len(data) - 4 and data[i + 2] == 0x00 and data[i + 3] == 0x01:
-                    start_positions.append(i) 
-                    i += 4
-                else:
-                    i += 2
-            else:
-                i += 1
-        return start_positions
-
-    def extract_nal_units_from_file(file_path):
-        """
-        Extract NAL units from a file containing RBSP data and handle data across buffer boundaries.
-        """
-        buffer_size = 4096
-        nal_units = []
-        pending_data = b''
-
-        parser = H26xParser(None, True, byte_stream=None)
-        with open(file_path, 'rb') as file:
-            while True:
-                data = file.read(buffer_size)
-                if not data:
-                    break
-                # Prepend pending data from previous buffer read
-                data = pending_data + data
-
-                # Find start codes in the current buffer
-                start_positions = find_start_codes(data)
-
-                # Check if we should preserve some data for the next buffer
-                if start_positions:
-                    last_start = start_positions[-1]
-                    pending_data = data[last_start:]
-                    data = data[:last_start]
-                else:
-                    pending_data = data
-                    continue
-
-                # Extract NAL units from this buffer slice
-                for i in range(len(start_positions) - 1):
-                    start = start_positions[i]
-                    end = start_positions[i + 1]
-                    nal_units.append(data[start:end])
-                    parser.parse(byte_stream=data[start:end])
-
-            # Handle the last NAL unit
-            if pending_data:
-                last_positions = find_start_codes(pending_data)
-                if last_positions:
-                    for i in range(len(last_positions) - 1):
-                        start = last_positions[i]
-                        end = last_positions[i + 1]
-                        nal_units.append(pending_data[start:end])
-                    # Append the last fragment
-                    nal_units.append(pending_data[last_positions[-1]:])
-
-        return nal_units
 
     # Example usage
     nal_units = extract_nal_units_from_file(args.input_file)

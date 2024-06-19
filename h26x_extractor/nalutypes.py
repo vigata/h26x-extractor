@@ -78,6 +78,25 @@ def get_description(nal_unit_type):
         NAL_UNIT_TYPE_CODED_SLICE_AUX: "Coded slice of an auxiliary coded picture without partitioning",
     }.get(nal_unit_type, "unknown")
 
+def get_nalu_info(nal_unit_type): 
+    ret = {
+        NAL_UNIT_TYPE_UNSPECIFIED : {"desc" : get_description(nal_unit_type), "cid": None},
+        NAL_UNIT_TYPE_CODED_SLICE_NON_IDR : {"desc" : get_description(nal_unit_type), "cid": "slice"},
+        NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_A : {"desc" : get_description(nal_unit_type), "cid": "slice"},
+        NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_B : {"desc" : get_description(nal_unit_type), "cid": "slice"},
+        NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_C : {"desc" : get_description(nal_unit_type), "cid": "slice"},
+        NAL_UNIT_TYPE_CODED_SLICE_IDR : {"desc" : get_description(nal_unit_type), "cid": "slice"},
+        NAL_UNIT_TYPE_SEI : {"desc" : get_description(nal_unit_type), "cid": "sei"},
+        NAL_UNIT_TYPE_SPS : {"desc" : get_description(nal_unit_type), "cid": "sps"},
+        NAL_UNIT_TYPE_PPS : {"desc" : get_description(nal_unit_type), "cid": "pps"},
+        NAL_UNIT_TYPE_AUD : {"desc" : get_description(nal_unit_type), "cid": "aud"},
+        NAL_UNIT_TYPE_END_OF_SEQUENCE : {"desc" : get_description(nal_unit_type), "cid": "eoseq"},
+        NAL_UNIT_TYPE_END_OF_STREAM : {"desc" : get_description(nal_unit_type), "cid": "eostr"},
+        NAL_UNIT_TYPE_FILLER : {"desc" : get_description(nal_unit_type), "cid": "filler"},
+        NAL_UNIT_TYPE_SPS_EXT : {"desc" : get_description(nal_unit_type), "cid": None},
+        NAL_UNIT_TYPE_CODED_SLICE_AUX : {"desc" : get_description(nal_unit_type), "cid": "slice"}
+    }
+    return ret[nal_unit_type]
 
 def _get_slice_type(slice_type):
     """
@@ -103,32 +122,70 @@ class NALU(object):
     The type must be inferred from the NALU header, before initializing the NALU by its subclass.
     """
 
-    def __init__(self, rbsp_bytes, verbose, order=None):
-        self.s = rbsp_bytes
+    def __init__(self, rbsp_bytes, verbose, order=[], start_offset=0, end_offset=0, type=0 ):
+        self.s : bitstring.bitstream.BitStream = bitstring.bitstream.BitStream(rbsp_bytes)
+        self.rbsp_bytes : bytearray = rbsp_bytes
         self.verbose = verbose
         self.order = order
+        self.start_offset = start_offset
+        self.end_offset = end_offset
+        self.type = type
+        self._out = ''
+        self.callback_id = get_nalu_info(self.type)["cid"]
+        
+    def _print(self,str):
+        self._out += str + '\n'
 
-    def print_verbose(self):
-        if self.verbose:
-            print(
-                self.__class__.__name__
-                + " (payload size: "
-                + str(len(self.s) / 8)
-                + " Bytes)"
-            )
-            to_print = []
-            if self.order is not None:
-                for key in self.order:
-                    if key in vars(self):
-                        value = vars(self)[key]
-                        to_print.append([key, value])
-            for key, value in sorted(vars(self).items()):
-                if key == "verbose" or key == "s" or key == "order":
-                    continue
-                if self.order and key in self.order:
-                    continue
-                to_print.append([key, value])
-            print(tabulate(to_print, headers=["field", "value"], tablefmt="grid"))
+    def __str__(self):
+        self._out = ''
+        self._print("")
+        self._print(
+            "========================================================================================================"
+        )
+        self._print("")
+        self._print("NALU bytepos:\t[" + str(self.start_offset) + ", " + str(self.end_offset) + "]")
+        self._print("NALU offset:\t" + str(self.start_offset) + " Bytes")
+        self._print(
+            "NALU length:\t"
+            + str(self.end_offset - self.start_offset + 1)
+            + " Bytes (including self.start_offset code)"
+        )
+
+        self._print(
+            "NALU type:\t"
+            + str(self.type)
+            + " ("
+            + get_description(self.type)
+            + ")"
+        )
+
+        substr = self.rbsp_bytes.hex()
+        if len(substr) > 250:
+            substr = substr[:250] + "..."
+        self._print("NALU bytes:\t" + "0x" + substr)
+        self._print_fields()
+        return self._out
+
+    def _print_fields(self):
+        self._print(
+            self.__class__.__name__
+            + " (payload size: "
+            + str(len(self.s) / 8)
+            + " Bytes)"
+        )
+        to_print = []
+        if self.order is not None:
+            for key in self.order:
+                if key in vars(self):
+                    value = vars(self)[key]
+                    to_print.append([key, value])
+        # for key, value in sorted(vars(self).items()):
+        #     if key == "verbose" or key == "s" or key == "order":
+        #         continue
+        #     if self.order and key in self.order:
+        #         continue
+        #     to_print.append([key, value])
+        self._print(tabulate(to_print, headers=["field", "value"], tablefmt="grid"))
 
 
 class AUD(NALU):
@@ -137,11 +194,11 @@ class AUD(NALU):
     """
 
     def __init__(self, rbsp_bytes, verbose):
-        super(AUD, self).__init__(rbsp_bytes, verbose)
+        super(AUD, self).__init__(rbsp_bytes, verbose, type=NAL_UNIT_TYPE_AUD)
 
         self.primary_pic_type = self.s.read("uint:3")
 
-        self.print_verbose()
+        # self.print_verbose()
 
 
 class CodedSliceIDR(NALU):
@@ -161,7 +218,7 @@ class CodedSliceIDR(NALU):
             "bottom_field_flag",
             "idr_pic_id",
         ]
-        super(CodedSliceIDR, self).__init__(rbsp_bytes, verbose, order)
+        super(CodedSliceIDR, self).__init__(rbsp_bytes, verbose, order, type=NAL_UNIT_TYPE_CODED_SLICE_IDR)
         # parse slice_header
         self.first_mb_in_slice = self.s.read("ue")
         self.slice_type = self.s.read("ue")
@@ -183,7 +240,7 @@ class CodedSliceIDR(NALU):
         if IdrPicFlag:
             self.idr_pic_id = self.s.read("ue")
 
-        self.print_verbose()
+        # self.print_verbose()
 
 
 class CodedSliceNonIDR(NALU):
@@ -192,7 +249,7 @@ class CodedSliceNonIDR(NALU):
     """
 
     def __init__(self, rbsp_bytes, nalu_sps, nalu_pps, verbose):
-        super(CodedSliceNonIDR, self).__init__(rbsp_bytes, verbose)
+        super(CodedSliceNonIDR, self).__init__(rbsp_bytes, verbose, type=NAL_UNIT_TYPE_CODED_SLICE_NON_IDR)
 
         # parse slice_header
         self.first_mb_in_slice = self.s.read("ue")
@@ -200,7 +257,7 @@ class CodedSliceNonIDR(NALU):
         self.slice_type_clear = _get_slice_type(self.slice_type)
         self.pic_parameter_set_id = self.s.read("ue")
 
-        self.print_verbose()
+        # self.print_verbose()
 
 class SEI(NALU):
     """
@@ -208,7 +265,13 @@ class SEI(NALU):
     """
 
     def __init__(self, rbsp_bytes, verbose):
-        super(SEI, self).__init__(rbsp_bytes, True)
+        order = [
+            "payloadType",
+            "payloadSize",
+            "uuid_iso_iec_11578",
+            "user_data_payload"
+        ]
+        super(SEI, self).__init__(rbsp_bytes, True, order, type=NAL_UNIT_TYPE_SEI)
         bs :bitstring.Bitstream = self.s
     
         payloadType = 0
@@ -224,13 +287,10 @@ class SEI(NALU):
         payloadSize += bs.read('uint:8')
 
 
-        print("SEI payloadType: ", payloadType)
-        print("SEI payloadSize: ", payloadSize)
+        # print("SEI payloadType: ", payloadType)
+        # print("SEI payloadSize: ", payloadSize)
 
 
-        self.order = [
-            'uuid_iso_iec_11578'
-            ]
         self.payloadType = payloadType
         self.payloadSize = payloadSize
         if payloadType == 5:
@@ -242,7 +302,7 @@ class SEI(NALU):
 
             self.user_data_payload = str(ba)
 
-        self.print_verbose()
+        # self.print_verbose()
 
 class SPS(NALU):
     """
@@ -289,7 +349,7 @@ class SPS(NALU):
             "frame_crop_bottom_offset",
             "vui_parameters_present_flag",
         ]
-        super(SPS, self).__init__(rbsp_bytes, verbose, order)
+        super(SPS, self).__init__(rbsp_bytes, verbose, order, type=NAL_UNIT_TYPE_SPS)
 
         # initializers
         self.offset_for_ref_frame = []
@@ -366,7 +426,7 @@ class SPS(NALU):
         # TODO: parse VUI
         # self.rbsp_stop_one_bit         = self.s.read('uint:1')
 
-        self.print_verbose()
+        # self.print_verbose()
 
 
 class PPS(NALU):
@@ -396,7 +456,7 @@ class PPS(NALU):
             "constrained_intra_pred_flag",
             "redundant_pic_cnt_present_flag",
         ]
-        super(PPS, self).__init__(rbsp_bytes, verbose, order)
+        super(PPS, self).__init__(rbsp_bytes, verbose, order, type=NAL_UNIT_TYPE_PPS)
 
         self.pic_parameter_set_id = self.s.read("ue")
         self.seq_parameter_set_id = self.s.read("ue")
@@ -435,4 +495,6 @@ class PPS(NALU):
         self.constrained_intra_pred_flag = self.s.read("uint:1")
         self.redundant_pic_cnt_present_flag = self.s.read("uint:1")
 
-        self.print_verbose()
+        # self.print_verbose()
+
+
